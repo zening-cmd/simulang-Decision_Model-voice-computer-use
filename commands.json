@@ -1,0 +1,60 @@
+{
+  "sites": {
+    "google": "https://www.google.com",
+    "youtube": "https://www.youtube.com",
+    "gmail": "https://mail.google.com",
+    "google calendar": "https://calendar.google.com",
+    "google drive": "https://drive.google.com",
+    "google maps": "https://maps.google.com",
+    "github": "https://github.com",
+    "linkedin": "https://www.linkedin.com",
+    "wikipedia": "https://www.wikipedia.org",
+    "amazon": "https://www.amazon.com",
+    "simular": "https://www.simular.ai"
+  },
+  "apps": {
+    "notepad": "Notepad",
+    "calculator": "Calculator",
+    "file explorer": "File Explorer",
+    "settings": "Settings",
+    "terminal": "Terminal",
+    "paint": "Paint",
+    "word": "Word",
+    "excel": "Excel",
+    "powerpoint": "PowerPoint",
+    "outlook": "Outlook",
+    "slack": "Slack",
+    "spotify": "Spotify",
+    "visual studio code": "Visual Studio Code"
+  },
+  "search": {
+    "youtube": "https://www.youtube.com/results?search_query=",
+    "linkedin": "https://www.linkedin.com/search/results/all/?keywords=",
+    "github": "https://github.com/search?q=",
+    "amazon": "https://www.amazon.com/s?k=",
+    "wikipedia": "https://en.wikipedia.org/w/index.php?search=",
+    "google maps": "https://www.google.com/maps/search/",
+    "gmail": "https://mail.google.com/mail/u/0/#search/",
+    "google drive": "https://drive.google.com/drive/search?q=",
+    "google": "https://www.google.com/search?q="
+  },
+  "aliases": {
+    "link in": "LinkedIn",
+    "linked in": "LinkedIn",
+    "linkin": "LinkedIn",
+    "linking": "LinkedIn",
+    "you tube": "YouTube",
+    "git hub": "GitHub",
+    "g mail": "Gmail",
+    "gee mail": "Gmail",
+    "power point": "PowerPoint",
+    "simulator ai": "Simular AI",
+    "common": "comment",
+    "comet": "comment",
+    "commend": "comment",
+    "is post": "this post",
+    "list post": "this post",
+    "miss post": "this post",
+    "dis post": "this post"
+  }
+}

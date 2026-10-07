@@ -1,0 +1,9 @@
+# Local Whisper backup: downloaded binaries and models (see README)
+whisper/
+
+# Runtime data: transcripts and voice recordings stay on the machine
+app/engine.log
+app/clips/
+
+node_modules/
+*.wav

@@ -1,13 +1,14 @@
 // Voice control: the offline listener hears a command, Simulang carries it out on this machine.
 //   simulang run voice.ts                 listen to the microphone
 //   VOICE_TEXT=1 simulang run voice.ts    type commands instead (for testing)
-import { Machine, FocusPolicy, Visibility, Key, Direction, Coordinate, type App } from '@simular-ai/simulang-js'
+import { Machine, FocusPolicy, Visibility, Key, Direction, Coordinate, QuestionKind, type App } from '@simular-ai/simulang-js'
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { searchUrl } from './router.ts'
+import { searchUrl, useDecider } from './router.ts'
+import { makeDecider } from './decider.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const cfg = JSON.parse(readFileSync(join(here, 'commands.json'), 'utf8')) as {
@@ -15,8 +16,13 @@ const cfg = JSON.parse(readFileSync(join(here, 'commands.json'), 'utf8')) as {
   apps: Record<string, string>
   aliases?: Record<string, string>
   search?: Record<string, string>
+  decider?: string
 }
 const machine = Machine.local()
+// Decision model for routing and corrections ("decider" in commands.json); the agent picks the same one.
+const decider = makeDecider(cfg.decider, (s) => console.log('  ' + s))
+useDecider(decider)
+console.log(`  (decisions: ${decider.name === 'openai' ? 'OpenAI gpt-6-luna only' : 'Jev'})`)
 
 // Sound-alike fixes from commands.json ("link in" -> "LinkedIn"): names that Whisper hears as ordinary words.
 const aliasRules = Object.entries(cfg.aliases ?? {})
@@ -81,6 +87,7 @@ let agentProc: ReturnType<typeof spawn> | null = null
 let pendingConfirm = false
 let pendingTextFor: string | null = null // a task waiting for the words to write
 let leftover: { text: string; at: number } | null = null // last phrase that matched no command
+let fragment: { text: string; at: number } | null = null // a short unmatched phrase, maybe the start of the next one
 function answerConfirm(text: string) {
   const t = text.toLowerCase().replace(/[^a-z' ]+/g, ' ').trim()
   const yes = /^(?:yes|yeah|yep|yup|sure|confirm|confirmed|go ahead|do it|post it|send it|okay|ok|please do)\b/.test(t)
@@ -90,17 +97,26 @@ function answerConfirm(text: string) {
   agentProc?.stdin?.write(yes ? 'yes\n' : 'no\n')
   console.log(yes ? '  approved' : '  declined')
 }
+// The last few tasks and how they ended: passed to the agent (so "all of them" and "again" make sense) and used
+// to retry when the user complains ("why didn't you click pending?").
+let taskHistory: { task: string; outcome: string }[] = []
+const FEEDBACK = /^\W*(?:(?:no|hey|but|so)[\s,.!]+)?(?:why (?:did|didn't|did not|don't|do not|do|you|are|is|isn't)|you (?:just|only|didn't|did not|still|missed|forgot)|that'?s (?:not|wrong)|(?:it|this|that) (?:didn't|did not|doesn't|does not|isn't|is not) work|not working|still not|try (?:it )?again|do it again|again)\b/i
 function startTask(task: string) {
   if (agentBusy) return console.log('  (still working on the last task - say "stop" to cancel it)')
   agentBusy = true
   console.log('  task started')
   const front = targetWindow()?.title ?? ''
   const startedAt = Date.now()
+  const history = taskHistory.map((h) => `"${h.task}" -> ${h.outcome}`)
   const proc = spawn('cmd.exe', ['/c', 'simulang', 'run', join(here, 'agent-cli.ts')], {
-    cwd: here, env: { ...process.env, AGENT_TASK: task, AGENT_FRONT: front, RUST_LOG: 'warn' }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: here, env: { ...process.env, AGENT_TASK: task, AGENT_FRONT: front, AGENT_HISTORY: JSON.stringify(history), RUST_LOG: 'warn' },
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
   agentProc = proc
+  let outcome = 'ended without a result'
   createInterface({ input: proc.stdout! }).on('line', (l) => {
+    if (/^(?:done|stopped|task failed|no window|no clickable|ANSWER )/.test(l.trim())) outcome = l.trim().slice(0, 160)
+    if (l.startsWith('ANSWER ')) return console.log(l) // the answer to a question, shown on the badge
     if (l.startsWith('CONFIRM ')) { pendingConfirm = true; return console.log('ASK ' + l.slice(8)) }
     // The agent needs the words to write: the user's next phrase is that text, for this same task.
     if (l.startsWith('NEED_TEXT')) {
@@ -118,9 +134,14 @@ function startTask(task: string) {
     }
     if (l.trim() && !l.includes('OPENROUTER_API_KEY')) console.log('  ' + l.trim())
   })
-  createInterface({ input: proc.stderr! }).on('line', (l) => { if (/error|failed/i.test(l) && !l.includes('OPENROUTER_API_KEY')) console.log('  ' + l.trim()) })
-  // Only reset if this is still the current task (a follow-up task may already have replaced it).
-  proc.on('exit', () => { if (agentProc === proc) { agentBusy = false; agentProc = null; pendingConfirm = false } })
+  createInterface({ input: proc.stderr! }).on('line', (l) => {
+    if (/error|failed/i.test(l) && !/OPENROUTER_API_KEY|Assertion failed/.test(l)) console.log('  ' + l.trim())
+  })
+  proc.on('exit', () => {
+    taskHistory = [...taskHistory, { task, outcome }].slice(-3)
+    // Only reset if this is still the current task (a follow-up task may already have replaced it).
+    if (agentProc === proc) { agentBusy = false; agentProc = null; pendingConfirm = false }
+  })
 }
 function stopTask() {
   if (!agentProc?.pid) return console.log('  (no task running)')
@@ -151,6 +172,11 @@ function handle(said: string): boolean {
   else if (s === 'scroll down') scrollWindow(6)
   else if (s === 'scroll up') scrollWindow(-6)
   else if (s === 'press enter') combo([], Key.Return)
+  // Media keys work for YouTube, Spotify and most players, whichever window has focus.
+  else if (/^(?:pause|play|resume|stop)(?: the| this)?(?: video| music| song| it)?$/.test(s) && s !== 'stop') machine.key(Key.MediaPlayPause, Direction.Click)
+  else if (/^(?:mute|unmute)(?: the| this)?(?: video| sound| it)?$/.test(s)) machine.key(Key.VolumeMute, Direction.Click)
+  else if (/^(?:volume up|louder|turn it up)$/.test(s)) { for (let i = 0; i < 5; i++) machine.key(Key.VolumeUp, Direction.Click) }
+  else if (/^(?:volume down|quieter|turn it down)$/.test(s)) { for (let i = 0; i < 5; i++) machine.key(Key.VolumeDown, Direction.Click) }
   else if (/^maximi[sz]e (?:the |this )?window$/.test(s)) targetWindow()?.maximize()
   else if (/^minimi[sz]e (?:the |this )?window$/.test(s)) targetWindow()?.minimize()
   else { console.log(`  (no command for "${s}")`); return true }
@@ -161,6 +187,7 @@ function handle(said: string): boolean {
 const FIXED = ['open browser', 'new tab', 'close tab', 'next tab', 'previous tab', 'go back', 'go forward',
   'refresh', 'scroll down', 'scroll up', 'press enter', 'stop listening', 'stop', 'cancel',
   'maximize window', 'maximize the window', 'minimize window', 'minimize the window',
+  'pause', 'pause the video', 'play', 'play the video', 'resume', 'mute', 'unmute', 'volume up', 'volume down',
   ...Object.keys(cfg.sites).map((s) => `open ${s}`), ...Object.keys(cfg.apps).map((a) => `open ${a}`)]
 // Whisper's usual output for silence or noise
 const NOISE = new Set(['', 'you', 'thank you', 'thanks', 'thanks for watching', 'bye', 'okay', 'ok', 'uh', 'um'])
@@ -385,25 +412,53 @@ async function transcribeClip(path: string): Promise<string> {
   return new SamplesBuffer(channels, rate, samples).transcribe(stt as any)
 }
 
-async function runClip(path: string): Promise<boolean> {
+// fromSpeakers: the speakers were playing (a video, music) while this phrase was recorded, so the microphone may be
+// hearing them (there is no echo cancellation). Then a phrase only counts if it starts with the wake word
+// ("Computer, pause the video"); a video cannot say that by accident, so its audio never triggers anything.
+const WAKE = /^\W*(?:hey\s+|ok(?:ay)?\s+)?(?:computer|computers|compute her)\b[\s,.:!-]*/i
+async function runClip(path: string, fromSpeakers = false): Promise<boolean> {
   const t0 = performance.now()
   console.log('THINK')
   let text: string
   try { text = await transcribeClip(path) } catch (e) {
     console.log(`  (could not transcribe: ${e instanceof Error ? e.message : e})`); return true
   }
+  // A pause can split one sentence ("I'd like to watch ... the third video"). A short phrase that matched nothing
+  // just before is the start of this one: join them.
+  if (fragment && Date.now() - fragment.at < 4000 && /[a-z0-9]/i.test(text)) {
+    text = `${fragment.text} ${text.trim()}`
+    console.log(`  (joined with the previous phrase: "${text}")`)
+  }
+  fragment = null
   const corrected = applyAliases(text)
   if (corrected !== text) {
     // Only use the name-corrected wording when it makes sense ("open the link in this browser" -> LinkedIn,
     // but "click the link in this email" stays as heard).
     const { pickReading } = await import('./router.ts')
-    try { text = pickReading(text, corrected, Object.keys(cfg.sites), Object.keys(cfg.apps), targetWindow()?.title ?? null) } catch {}
+    try { text = await pickReading(text, corrected, Object.keys(cfg.sites), Object.keys(cfg.apps), targetWindow()?.title ?? null) } catch {}
   }
   console.log(`HEARD ${text.trim()}`)
   if (text.trim()) ctx.recent = [...ctx.recent, text.trim()].slice(-3)
   // Nothing understood means nothing to do: never let a model guess an action from an empty transcript.
   if (!/[a-z0-9]/i.test(text)) { console.log('  (heard nothing clear - try again a bit louder)'); return true }
+  if (fromSpeakers) {
+    if (!WAKE.test(text)) {
+      fragment = null // never join speaker audio with the next phrase
+      console.log('  (ignored: sound is playing - start with "Computer, ..." so I know it\'s you)')
+      return true
+    }
+    text = text.replace(WAKE, '')
+    if (!/[a-z0-9]/i.test(text)) { console.log('  (heard "Computer" - say the request right after it)'); return true }
+  } else text = text.replace(WAKE, '') // the wake word is also fine when nothing is playing
   if (pendingConfirm) { answerConfirm(text); return true }
+  // Feedback about the last task ("why didn't you click pending?", "you just approved one", "try again") is not a
+  // new goal: redo the last task, with the user's words and how it ended as guidance.
+  const last = taskHistory.at(-1)
+  if (last && FEEDBACK.test(text.trim())) {
+    console.log(`  retrying: ${last.task}`)
+    startTask(`${last.task.replace(/[.?!\s]+$/, '')}. Retry - last attempt ended with "${last.outcome}"; the user says: "${text.trim()}"`)
+    return true
+  }
   if (pendingTextFor) {
     const task = pendingTextFor
     pendingTextFor = null
@@ -413,10 +468,25 @@ async function runClip(path: string): Promise<boolean> {
     startTask(`${task.replace(/[.?!]+$/, '')}: ${words}`)
     return true
   }
-  // A near-exact command needs no model call; anything else is routed by Jev.
-  const command = toCommand(text) ?? (await routed(text))
+  // A single word that is not a known command ("Video.", "Okay.") is a fragment, not a request: keep it to join
+  // with the next phrase instead of letting a model turn them into a task.
+  const quick = toCommand(text)
+  if (!quick && text.trim().split(/\s+/).length <= 1) {
+    fragment = { text: text.trim().replace(/[.?!]+$/, ''), at: Date.now() }
+    console.log(`  (too short to act on: "${fragment.text}" - waiting for the rest)`)
+    return true
+  }
+  // A near-exact command needs no model call; anything else is routed by the decision model.
+  let command: string | null
+  try { command = quick ?? (await routed(text)) } catch (e) {
+    // No fallback model: report the failure and do nothing (and keep the phrase queue moving).
+    console.log(`  (decision failed: ${e instanceof Error ? e.message.slice(0, 120) : e} - nothing was done)`)
+    return true
+  }
   if (!command) {
     leftover = { text: text.trim().replace(/[.?!]+$/, ''), at: Date.now() }
+    // Short and unmatched: probably the first half of a sentence; keep it to join with the next phrase.
+    if (text.trim().split(/\s+/).length <= 6) fragment = { text: text.trim().replace(/[.?!]+$/, ''), at: Date.now() }
     console.log(`  (no command for "${text.trim().toLowerCase().replace(/[.?!]+$/, '')}")`)
     return true
   }
@@ -426,7 +496,7 @@ async function runClip(path: string): Promise<boolean> {
 // Turn Jev's intent into a command string the handler runs.
 async function routed(text: string): Promise<string | null> {
   const { route } = await import('./router.ts')
-  const r = route(text, Object.keys(cfg.sites), Object.keys(cfg.apps), { currentApp: targetWindow()?.title ?? null, recent: ctx.recent.slice(0, -1) })
+  const r = await route(text, Object.keys(cfg.sites), Object.keys(cfg.apps), { currentApp: targetWindow()?.title ?? null, recent: ctx.recent.slice(0, -1) })
   switch (r.kind) {
     case 'search': return r.query ? `search for ${r.query}` : null
     case 'site': case 'app': return `open ${r.name}`
@@ -461,10 +531,13 @@ if (process.env.VOICE_TEXT === '1') {
     if (!line.startsWith('~')) return run(line) ? rl.prompt() : rl.close()
     const t0 = performance.now()
     void (async () => {
-      const command = toCommand(line.slice(1)) ?? (await routed(line.slice(1)))
+      let command: string | null = null
+      try { command = toCommand(line.slice(1)) ?? (await routed(line.slice(1))) } catch (e) {
+        console.log(`  (decision failed: ${e instanceof Error ? e.message.slice(0, 120) : e} - nothing was done)`)
+      }
       console.log(`  matched: ${command}`)
       if (command && !run(command, performance.now() - t0)) return rl.close()
-      rl.prompt()
+      try { rl.prompt() } catch {} // input may have ended while the model was deciding
     })()
   })
 } else {
@@ -473,25 +546,40 @@ if (process.env.VOICE_TEXT === '1') {
     const m = l.trim().match(/^ANSWER (yes|no)$/i)
     if (m && pendingConfirm) answerConfirm(m[1])
   })
-  const listener = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(here, 'listener.ps1')], {
-    stdio: ['ignore', 'pipe', 'inherit'],
-  })
-  const rl = createInterface({ input: listener.stdout })
   let clips: Promise<unknown> = Promise.resolve()
-  rl.on('line', (line) => {
-    if (line === 'READY') {
+  let listener: ReturnType<typeof spawn>
+  let stopping = false // true only when the user said "stop listening"
+  const quit = () => { stopping = true; listener.kill(); console.log('stopped: you said "stop listening"'); process.exit(0) }
+  // The microphone capture runs as its own process. If it ever exits (an audio device error), start it again
+  // instead of stopping voice control.
+  const startListener = () => {
+    listener = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(here, 'listener.ps1')], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
+    createInterface({ input: listener.stdout! }).on('line', onListenerLine)
+    listener.on('exit', (code) => {
+      if (stopping) return
+      console.log(`  (microphone capture stopped (${code}) - restarting it)`)
+      setTimeout(startListener, 1000)
+    })
+  }
+  const onListenerLine = (line: string) => {
+    if (line.startsWith('READY')) {
       // Load the models now so the first spoken request doesn't pay their setup cost.
-      import('./router.ts').then((r) => r.warm()).catch(() => {})
+      // One tiny decision opens the connection, so the first real request isn't slower.
+      decider.decide('warm up', { ok: { kind: QuestionKind.Noul, instructions: 'Is this text?' } })
+        .catch((e) => console.log(`  (decision model not reachable: ${e instanceof Error ? e.message.slice(0, 120) : e})`))
       import('@simular-ai/simulang-js').then(({ SttModel }) => { try { stt ??= SttModel.byAlias('openrouter_whisper_large_v3') as any } catch {} })
     }
-    if (line === 'READY') return console.log('Listening. Try "open google", "search for weather", "computer <any task>", or "stop listening".')
+    if (line.startsWith('READY')) return console.log(`Listening${line.includes('AEC') ? ' (echo cancellation on: speaker sound is ignored)' : ''}. Try "open google", "search for weather", or "stop listening".`)
     if (/^(HEAR|MISS|LEVEL) /.test(line)) return console.log(line) // live feedback for the UI, not a command
     if (line.startsWith('AUDIO ')) {
       // One clip at a time, in order, so commands never run out of sequence.
-      clips = clips.then(() => runClip(line.slice(6))).then((go) => { if (!go) { listener.kill(); process.exit(0) } })
+      const [, path, flag] = line.match(/^AUDIO (.+?)( SPEAKERS)?$/) ?? []
+      clips = clips.then(() => runClip(path, !!flag)).then((go) => { if (!go) quit() })
       return
     }
-    if (!run(line)) { listener.kill(); process.exit(0) }
-  })
-  listener.on('exit', (code) => { console.log(`listener stopped (${code})`); process.exit(code ?? 0) })
+    if (!run(line)) quit()
+  }
+  startListener()
 }

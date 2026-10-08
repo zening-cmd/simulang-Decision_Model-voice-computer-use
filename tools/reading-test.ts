@@ -18,7 +18,7 @@ const cases: [string, string, 'LinkedIn' | 'as heard'][] = [
 ]
 for (const [heard, front, want] of cases) {
   const t = performance.now()
-  const got = pickReading(heard, fix(heard), Object.keys(cfg.sites), Object.keys(cfg.apps), front)
+  const got = await pickReading(heard, fix(heard), Object.keys(cfg.sites), Object.keys(cfg.apps), front)
   const kind = got === heard ? 'as heard' : 'LinkedIn'
   console.log(`${kind === want ? 'ok  ' : 'FAIL'} ${String(Math.round(performance.now() - t)).padStart(4)} ms  [${front}]  ${heard}  ->  ${got}`)
 }

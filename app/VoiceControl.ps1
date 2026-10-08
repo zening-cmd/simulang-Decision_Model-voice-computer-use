@@ -148,13 +148,29 @@ $timer.Add_Tick({
     elseif ($l -match '^> (.+?)\s+failed: (.+)$') { Set-Status ('"' + $Matches[1] + '"') ("failed: " + $Matches[2]) 'OrangeRed' }
     elseif ($l -match '^\s+\(no command for "(.+)"\)') { Set-Status ('"' + $Matches[1] + '"') 'not a command' 'Gray' }
     elseif ($l -match '^ASK (.+)$') { Set-Status ($Matches[1].Substring(0, [Math]::Min(48, $Matches[1].Length)) + '?') 'Say "yes" or "no" - or click' 'Orange'; Show-Answer $true }
+    elseif ($l -match '^ANSWER (.+)$') {
+      # Short version on the badge; the full answer (e.g. a list of names) as a Windows notification.
+      $ans = $Matches[1]
+      Set-Status ($ans.Substring(0, [Math]::Min(48, $ans.Length)) + $(if ($ans.Length -gt 48) { '...' } else { '' })) 'answer - full text in the notification' 'DeepSkyBlue'
+      $tray.BalloonTipTitle = 'Voice Control'; $tray.BalloonTipText = $ans.Substring(0, [Math]::Min(250, $ans.Length)); $tray.ShowBalloonTip(15000)
+    }
     elseif ($l -match '^ASKTEXT (.+)$') { Set-Status $Matches[1] 'Say the text now (or "cancel")' 'Orange' }
     elseif ($l -match '^\s+(approved|declined|task stopped|stopped.*|done.*|task failed.*)$') { Show-Answer $false; $detail.Text = $Matches[1].Substring(0, [Math]::Min(60, $Matches[1].Length)) }
     elseif ($l -match '^\s+(task started|plan: .*|step \d+: .*|working in: .*|done.*|stopped.*|task failed.*|approved|declined|confirmed|\(waiting for yes or no\)|task stopped)$') { $detail.Text = $Matches[1].Substring(0, [Math]::Min(60, $Matches[1].Length)) }
-    elseif ($l -like 'listener stopped*') { Set-Status 'Stopped' 'Use the tray icon to resume' 'Gray' }
+    elseif ($l -like 'stopped: you said*') { $script:userStopped = $true }
+    elseif ($l -match '^\s+\(microphone capture stopped') { $detail.Text = 'microphone hiccup - restarting it' }
   }
   if ($script:proc -and $script:proc.HasExited -and $miPause.Text -eq 'Pause listening') {
-    $script:proc = $null; Set-Status 'Stopped' 'Said "stop listening" - click tray > Resume' 'Gray'; $miPause.Text = 'Resume listening'
+    $script:proc = $null
+    if ($script:userStopped) {
+      # Only when the user actually said "stop listening".
+      $script:userStopped = $false
+      Set-Status 'Stopped' 'You said "stop listening" - click tray > Resume' 'Gray'; $miPause.Text = 'Resume listening'
+    } else {
+      # Anything else (a crash, an audio device error) restarts voice control automatically.
+      Add-Content -Path $logFile -Value ("{0:HH:mm:ss.fff} (engine stopped unexpectedly - restarting)" -f (Get-Date))
+      Start-Engine
+    }
   }
 })
 

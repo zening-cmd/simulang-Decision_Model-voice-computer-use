@@ -18,6 +18,6 @@ const samples = [
 ]
 for (const s of samples) {
   const t = performance.now()
-  const r = route(s, Object.keys(cfg.sites), Object.keys(cfg.apps))
+  const r = await route(s, Object.keys(cfg.sites), Object.keys(cfg.apps))
   console.log(`${String(Math.round(performance.now() - t)).padStart(5)} ms  ${s}  ->  ${JSON.stringify(r)}`)
 }

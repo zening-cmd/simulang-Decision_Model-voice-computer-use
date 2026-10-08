@@ -18,7 +18,7 @@ for (const [heard, wantFixed] of [
   ['Open the comet browser', false],
 ] as const) {
   const t = performance.now()
-  const got = pickReading(heard, fix(heard), Object.keys(cfg.sites), Object.keys(cfg.apps), front)
+  const got = await pickReading(heard, fix(heard), Object.keys(cfg.sites), Object.keys(cfg.apps), front)
   const fixed = got !== heard
   console.log(`${fixed === wantFixed ? 'ok  ' : 'FAIL'} ${String(Math.round(performance.now() - t)).padStart(4)} ms  ${heard.padEnd(38)} -> ${got}`)
 }

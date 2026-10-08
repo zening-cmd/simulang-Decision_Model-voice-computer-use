@@ -13,7 +13,7 @@ for (const [text, want] of [
   ['Maximize the window.', 'key'],
 ] as const) {
   const t = performance.now()
-  const r = route(text, Object.keys(cfg.sites), Object.keys(cfg.apps), ctx)
+  const r = await route(text, Object.keys(cfg.sites), Object.keys(cfg.apps), ctx)
   const ok = want === 'any' || r.kind === want
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${String(Math.round(performance.now() - t)).padStart(4)} ms  ${text.padEnd(36)} -> ${JSON.stringify(r)}  (sensible ${lastSensible.toFixed(2)})`)
 }

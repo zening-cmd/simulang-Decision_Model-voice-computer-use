@@ -1,4 +1,5 @@
 {
+  "decider": "openai",
   "sites": {
     "google": "https://www.google.com",
     "youtube": "https://www.youtube.com",
@@ -10,7 +11,8 @@
     "linkedin": "https://www.linkedin.com",
     "wikipedia": "https://www.wikipedia.org",
     "amazon": "https://www.amazon.com",
-    "simular": "https://www.simular.ai"
+    "simular": "https://www.simular.ai",
+    "partiful": "https://partiful.com"
   },
   "apps": {
     "notepad": "Notepad",
@@ -44,11 +46,25 @@
     "linkin": "LinkedIn",
     "linking": "LinkedIn",
     "you tube": "YouTube",
+    "new tube": "YouTube",
+    "restart video": "the third video",
+    "the start video": "the third video",
+    "a start video": "the third video",
+    "u tube": "YouTube",
     "git hub": "GitHub",
     "g mail": "Gmail",
     "gee mail": "Gmail",
     "power point": "PowerPoint",
     "simulator ai": "Simular AI",
+    "party full": "Partiful",
+    "partyful": "Partiful",
+    "party ful": "Partiful",
+    "party fall": "Partiful",
+    "party floor": "Partiful",
+    "party phone": "Partiful",
+    "party fold": "Partiful",
+    "party fool": "Partiful",
+    "particle": "Partiful",
     "common": "comment",
     "comet": "comment",
     "commend": "comment",

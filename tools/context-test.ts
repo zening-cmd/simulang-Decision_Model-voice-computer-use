@@ -12,7 +12,7 @@ for (const s of [
   'Open YouTube',
 ]) {
   const t = performance.now()
-  const r = route(s, Object.keys(cfg.sites), Object.keys(cfg.apps), ctx)
+  const r = await route(s, Object.keys(cfg.sites), Object.keys(cfg.apps), ctx)
   console.log(`${String(Math.round(performance.now() - t)).padStart(5)} ms  ${s}  ->  ${JSON.stringify(r)}`)
   ctx.recent = [...ctx.recent, s].slice(-3)
 }

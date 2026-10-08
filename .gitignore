@@ -7,3 +7,4 @@ app/clips/
 
 node_modules/
 *.wav
+app/toggles.json

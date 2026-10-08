@@ -20,8 +20,11 @@ export let lastSensible = 1
 const KEYS = ['new tab', 'close tab', 'next tab', 'previous tab', 'go back', 'go forward', 'refresh',
   'scroll down', 'scroll up', 'press enter', 'stop listening', 'maximize window', 'minimize window']
 
-let jev: DecisionModel | null = null
+// The decision model: Jev by default; voice.ts swaps in the one chosen in commands.json (see decider.ts).
+let jev: { decide(state: any, questions: any): any } | null = null
 export function warm() { jev ??= DecisionModel.openrouterJev() }
+/** Swap the decision model (anything with Jev's decide() shape, sync or async). */
+export function useDecider(d: { decide(state: any, questions: any): any }) { jev = d }
 
 // Pull the search terms out of a request like "find the best pizza near me in a google search".
 export function searchQuery(text: string) {
@@ -61,21 +64,23 @@ export function isJustOpening(text: string, name: string) {
 
 // Speech-to-text often hears a name as ordinary words ("LinkedIn" -> "link in"). Given the literal transcript and the
 // name-corrected one, keep whichever the user most plausibly said; never rewrite blindly.
-export function pickReading(heard: string, corrected: string, sites: string[], apps: string[], front: string | null): string {
+export async function pickReading(heard: string, corrected: string, sites: string[], apps: string[], front: string | null): Promise<string> {
   if (heard === corrected) return heard
   // The corrected sentence is a clear "open <name>" request: no model call needed.
   if ([...sites, ...apps].some((n) => isJustOpening(corrected, n))) return corrected
   jev ??= DecisionModel.openrouterJev()
-  const a = jev.decide({ window_in_front: front, as_heard: heard, with_name: corrected }, {
+  const a = await jev.decide({ window_in_front: front, as_heard: heard, with_name: corrected }, {
     reading: { kind: QuestionKind.Choice, options: { as_heard: heard, with_name: corrected }, instructions:
       'A voice command to a PC was transcribed by speech-to-text, which can mishear a product name as ordinary words ' +
       '(e.g. "LinkedIn" as "link in", "comment" as "common"). Given the window in front, which version did the user ' +
-      'actually say? Keep as_heard when it already makes sense as an instruction (a real product, place or phrase).' },
+      'actually say? Pick the version a person would naturally say to their computer. Keep as_heard only when it is ' +
+      'already natural and sensible (a real product, place or phrase); if it is odd or ungrammatical ' +
+      '(e.g. "watch restart video"), pick with_name.' },
   })
   return a.reading.choice === 'with_name' ? corrected : heard
 }
 
-export function route(text: string, sites: string[], apps: string[], ctx: Context = { currentApp: null, recent: [] }): Intent {
+export async function route(text: string, sites: string[], apps: string[], ctx: Context = { currentApp: null, recent: [] }): Promise<Intent> {
   if (!/[a-z0-9]/i.test(text)) return { kind: 'ignore' }
   // Plain "open <known name>" needs no model call.
   for (const s of sites) if (isJustOpening(text, s)) return { kind: 'site', name: s }
@@ -92,8 +97,9 @@ export function route(text: string, sites: string[], apps: string[], ctx: Contex
   for (const s of sites) options[`site:${s}`] = `Only open/launch the ${s} website, nothing more`
   for (const a of apps) options[`app:${a}`] = `Only open/launch the ${a} app, nothing more`
   for (const k of KEYS) options[`key:${k}`] = `Browser/keyboard action: ${k}`
-  const state = { request: text, app_already_open: ctx.currentApp, previous_requests: ctx.recent }
-  const a = jev.decide(state, {
+  // The window title comes from the screen (untrusted); it is context only, never instructions.
+  const state = { request: text, window_in_front_untrusted: ctx.currentApp, previous_requests: ctx.recent }
+  const a = await jev.decide(state, {
     intent: { kind: QuestionKind.Choice, options, instructions:
       'A user spoke this request to their Windows PC. Which single action fulfills it? ' +
       'If the request asks to do something inside an app (especially the one already open), choose task, not opening it again.' },
@@ -103,7 +109,8 @@ export function route(text: string, sites: string[], apps: string[], ctx: Contex
   const c = a.intent.choice
   lastSensible = a.sensible.probability
   // Tasks act on the screen, so a garbled phrase must never start one (it would invent a goal and click around).
-  if (c === 'task' && a.sensible.probability < SENSIBLE_MIN) return { kind: 'ignore' }
+  // Same for typing (it would type the gibberish into whatever is focused), searching and opening an unknown site.
+  if (['task', 'type', 'search', 'open_other_website'].includes(c) && a.sensible.probability < SENSIBLE_MIN) return { kind: 'ignore' }
   // Guard: "open X" only when the request is just opening X. "Like the post on this LinkedIn page" names
   // LinkedIn but asks for more, so it must not shrink to "open linkedin".
   if (c.startsWith('site:') || c.startsWith('app:')) {

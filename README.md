@@ -7,6 +7,9 @@ congratulations"). Ask questions ("who's still pending?") and it looks, then ans
 What's new in v2:
 - **Vision:** the decision model sees a screenshot of the window with every element's position, and a **vision
   verifier** compares before/after screenshots to confirm a task actually worked.
+- **Grounding:** when no listed element fits (icon-only buttons, canvas apps), a UI grounding model (UI-TARS 1.5)
+  finds the target on the screenshot and the agent clicks there, then verifies.
+- **Questions answered from the screenshot** as well as the page text, so images, charts and layout count.
 - **OpenAI Decisions API** (`gpt-6-luna`) for all decisions, about 2x faster than before (Jev remains available).
 - **Echo cancellation:** Windows' Voice Capture DSP removes your speakers' sound from the microphone, so a playing
   video is never heard as you.
@@ -35,7 +38,8 @@ microphone ─► listener.ps1 ─────────► speech-to-text ─
 | **OpenAI Decisions API** (`gpt-6-luna`) | Multiple-choice decisions in ~0.1–0.4 s with screenshots: intent, element, done?, sensible?, misheard name? |
 | **Deepgram Nova-3** (via OpenRouter) | Speech-to-text, ~0.2–0.4 s per phrase |
 | **Voice Capture DSP** (Windows) | Echo cancellation: subtracts what the speakers play from the microphone |
-| **GPT-4o-mini** (via OpenRouter) | Plans a task's goal, extracts text to type, answers questions from screen text |
+| **GPT-4o-mini** (via OpenRouter) | Plans a task's goal, extracts text to type, answers questions from the screenshot and screen text |
+| **UI-TARS 1.5** (via OpenRouter) | Grounding: finds an element on a screenshot when the element list has no match |
 | **whisper.cpp** (optional) | Local speech-to-text backup |
 
 ## Files
@@ -121,7 +125,8 @@ window in front, the names of on-screen elements and the text just before each o
 belongs to), plus a screenshot of that window at each step of a task and before/after screenshots to verify that a
 one-click task worked, are sent to the decision model (OpenAI Decisions API, or Jev via OpenRouter). The task planner
 (GPT-4o-mini via OpenRouter) receives the request, the window title and your last three requests with their results;
-for questions it also receives all visible text in the window. With local Whisper and no network, transcription
+for questions it also receives all visible text in the window and a screenshot of it. When no listed element fits,
+a screenshot and the goal are sent to a UI grounding model (UI-TARS 1.5 via OpenRouter) to locate what to click. With local Whisper and no network, transcription
 stays on the PC. The log (`app/engine.log`), your last 20 voice clips (`app/clips/`) and recently clicked toggles
 (`app/toggles.json`) stay on the PC and are excluded from git.
 

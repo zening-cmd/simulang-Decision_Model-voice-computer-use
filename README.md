@@ -1,6 +1,6 @@
-# Voice Control v2 (Simulang + OpenAI Decisions with vision)
+# Simulang Decision Model: Voice Control for Computer Use
 
-Talk to your Windows PC and it acts in about a second: open sites and apps, search, scroll, play videos, and do
+Voice-controlled computer use on Windows, built on Simulang with a vision decision model. Talk to your PC and it acts in about a second: open sites and apps, search, scroll, play videos, and do
 tasks inside apps ("like this video", "watch the second video", "approve all pending guests", "comment on this post:
 congratulations"). Ask questions ("who's still pending?") and it looks, then answers.
 
